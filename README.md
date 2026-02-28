@@ -76,13 +76,27 @@ TRAILING_INTERVAL_S=15.0
 | `BAR_WATCHER_POLL_S` | ช่วงเวลาตรวจสอบแท่งเทียน (วินาที) | 1.0 |
 | `TRAILING_INTERVAL_S` | ช่วงเวลาอัปเดต Trailing Stop (วินาที) | 15.0 |
 
-### การตั้งค่าใน `main.py`
+### การตั้งค่าใน `src/config.py`
 
 ```python
 SYMBOL = "XAUUSD"        # คู่เงินที่จะเทรด
 LOT_SIZE = 0.01          # ขนาดล็อต
 MAX_SL_POINTS = 500      # ระยะห่าง Stop Loss สูงสุด (points)
 DB_NAME = "trading_bot.db"  # ชื่อฐานข้อมูล
+```
+
+### โครงสร้างโปรเจกต์
+
+```
+src/
+├── __init__.py          # Python package
+├── config.py            # Configuration, constants, logging
+├── database.py          # Database operations
+├── mt5_client.py        # MT5 API wrappers (รวม mt5_lock)
+├── analysis.py          # Market data & AI decision
+├── execution.py         # Trade execution & trailing stop
+└── bot.py               # Bot routine & workers
+main.py                  # Entry point (main_async, semaphore, signal handler)
 ```
 
 ## 🎯 การใช้งาน
@@ -109,26 +123,42 @@ python main.py
 
 ```mermaid
 graph TB
-    A[Bar Watcher] -->|New M15 Bar| B[Bot Routine]
-    B --> C[Get Market Data]
-    C --> D[AI Decision]
-    D --> E[Execute Trade]
-    E --> F[Apply Trailing Stop]
-    G[Trailing Stop Worker] --> F
-    H[MT5 API] --> C
-    H --> E
-    H --> F
-    I[SQLite DB] --> J[Trade Logs]
-    E --> I
+    A[main.py] -->|Initialize| B[trading_semaphore]
+    A -->|Start Workers| C[bar_watcher_worker]
+    A -->|Start Workers| D[trailing_stop_worker]
+    C -->|New M15 Bar| E[bot_routine]
+    E --> F[get_market_data]
+    F --> G[get_ai_decision]
+    G --> H[execute_trade]
+    H --> I[log_trade]
+    D --> J[apply_trailing_stop_sync]
+    K[mt5_client.py] -->|mt5_lock| F
+    K -->|mt5_lock| H
+    K -->|mt5_lock| J
+    L[database.py] --> I
+    M[config.py] -->|Constants| F
+    M -->|Constants| J
+    M -->|Logger| E
+    M -->|Logger| C
+    M -->|Logger| D
+    N[analysis.py] --> F
+    N --> G
+    O[execution.py] --> H
+    O --> J
+    P[bot.py] --> E
+    P --> C
+    P --> D
 ```
 
 ### คอมโพเนนต์หลัก
 
-- **Bar Watcher Worker**: ตรวจสอบแท่งเทียน M15 และเริ่ม Bot Routine เมื่อแท่งปิด
-- **Bot Routine**: วงจรการวิเคราะห์และเทรดหลัก
-- **Trailing Stop Worker**: ปรับ Stop Loss อัตโนมัติ
-- **MT5 Helpers**: ฟังก์ชันช่วยสำหรับการเรียก MT5 API
-- **Database Helpers**: ฟังก์ชันบันทึกข้อมูลลง SQLite
+- **[`src/config.py`](src/config.py)**: จัดการ configuration, constants ทั้งหมด และ logging setup
+- **[`src/database.py`](src/database.py)**: ฟังก์ชันจัดการฐานข้อมูล SQLite
+- **[`src/mt5_client.py`](src/mt5_client.py)**: MT5 API wrappers และ `mt5_lock` สำหรับ thread-safe operations
+- **[`src/analysis.py`](src/analysis.py)**: ดึงข้อมูลตลาดและตัดสินใจด้วย AI (DeepSeek หรือ GLM)
+- **[`src/execution.py`](src/execution.py)**: ดำเนินการเทรดและ trailing stop
+- **[`src/bot.py`](src/bot.py)**: Bot routine และ async workers (bar_watcher_worker, trailing_stop_worker)
+- **[`main.py`](main.py)**: Entry point ที่จัดการ lifecycle ของบอท
 
 ## 📊 ตัวบ่งชี้ทางเทคนิค
 
