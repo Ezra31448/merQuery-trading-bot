@@ -1,0 +1,1 @@
+# merQuery-trading-bot
