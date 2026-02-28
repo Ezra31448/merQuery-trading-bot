@@ -25,6 +25,10 @@ ACTIVE_AI = os.getenv("ACTIVE_AI", "GLM")  # "DEEPSEEK" or "GLM"
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 GLM_API_KEY = os.getenv("GLM_API_KEY")
 
+# Decision Mode: "AI" or "RULE_BASED"
+# RULE_BASED is faster, more reliable, and has zero API cost
+DECISION_MODE = os.getenv("DECISION_MODE", "AI")  # "AI" or "RULE_BASED"
+
 # Risk Management
 MAX_DAILY_LOSS_USD = float(os.getenv("MAX_DAILY_LOSS_USD", "50"))
 MAGIC_NUMBER = int(os.getenv("MAGIC_NUMBER", "100100"))

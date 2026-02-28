@@ -125,8 +125,9 @@ def apply_trailing_stop_sync():
             logger.debug("ATR missing for trailing stop; skipping")
             return
 
-        # hysteresis in price units to prevent tiny adjust: half a point
-        hysteresis_price = point * 0.5
+        # hysteresis in price units to prevent tiny adjust: 10 pips (0.10 USD for XAUUSD)
+        # FIX: Increased from 0.5 to 10 to prevent spamming broker with frequent SL modifications
+        hysteresis_price = point * 10
 
         for p in positions:
             # identify bot positions
@@ -211,7 +212,13 @@ def get_daily_pnl():
             deals = mt5.history_deals_get(today, datetime.now())
         if not deals:
             return 0.0
-        pnl = sum(float(deal.profit) for deal in deals)
+        # FIX: Filter by MAGIC_NUMBER and comment to only count this bot's trades
+        pnl = sum(
+            float(deal.profit)
+            for deal in deals
+            if getattr(deal, "magic", None) == MAGIC_NUMBER
+            or (ACTIVE_AI in getattr(deal, "comment", ""))
+        )
         return pnl
     except Exception as e:
         logger.exception("get_daily_pnl error: %s", e)

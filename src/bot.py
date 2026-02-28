@@ -6,19 +6,20 @@ Contains the main bot routine and async workers.
 import asyncio
 import MetaTrader5 as mt5
 from datetime import datetime
-from src.config import SYMBOL, BAR_WATCHER_POLL_S, TRAILING_INTERVAL_S, MAX_DAILY_LOSS_USD, logger
+from src.config import SYMBOL, BAR_WATCHER_POLL_S, TRAILING_INTERVAL_S, MAX_DAILY_LOSS_USD, DECISION_MODE, logger
 from src.mt5_client import ensure_mt5_connected
-from src.analysis import get_market_data, get_ai_decision
+from src.analysis import get_market_data, get_ai_decision, get_rule_based_decision
 from src.execution import execute_trade, apply_trailing_stop_sync, get_daily_pnl
 
 
-def bot_routine():
-    """Main bot routine - performs analysis and executes trades."""
+def bot_routine(ai_decision, current_atr):
+    """Main bot routine - performs analysis and executes trades.
+    
+    Args:
+        ai_decision: Pre-computed AI decision dict
+        current_atr: Current ATR value in price units
+    """
     logger.info("Starting analysis cycle (bot_routine)")
-    market_context, current_atr = get_market_data(bars=200)
-    if market_context is None or current_atr is None:
-        logger.error("Market data not available - skipping cycle")
-        return
 
     # daily loss check
     daily_pnl = get_daily_pnl()
@@ -26,7 +27,6 @@ def bot_routine():
         logger.warning("Daily loss limit reached (%.2f). Skipping trading for this cycle.", daily_pnl)
         return
 
-    ai_decision = get_ai_decision(market_context)
     execute_trade(ai_decision, current_atr)
 
     # apply trailing after potential new position (caller already holds trading_semaphore)
@@ -56,10 +56,26 @@ async def bar_watcher_worker(poll_interval: float, stop_event: asyncio.Event, tr
                     logger.info("New closed M15 bar detected at %s", datetime.fromtimestamp(current_bar_time))
                     # small wait to ensure indicators/ticks stable
                     await asyncio.sleep(2)
-                    # acquire business logic semaphore before executing bot routine
+                    
+                    # FIX: Move AI call OUTSIDE semaphore to avoid blocking trailing_stop_worker
+                    market_context, current_atr = await asyncio.to_thread(get_market_data, bars=200)
+                    if market_context is None or current_atr is None:
+                        logger.error("Market data not available - skipping cycle")
+                        last_bar_time = current_bar_time
+                        continue
+                    
+                    # Use AI or Rule-based decision based on DECISION_MODE
+                    if DECISION_MODE == "RULE_BASED":
+                        logger.info("Using RULE_BASED decision mode")
+                        decision = await asyncio.to_thread(get_rule_based_decision, market_context)
+                    else:
+                        logger.info("Using AI decision mode (%s)", DECISION_MODE)
+                        decision = await asyncio.to_thread(get_ai_decision, market_context)
+                    
+                    # acquire business logic semaphore only for execution (not AI call)
                     async with trading_semaphore:
                         # run synchronous bot_routine in thread to avoid blocking loop
-                        await asyncio.to_thread(bot_routine)
+                        await asyncio.to_thread(bot_routine, decision, current_atr)
                     last_bar_time = current_bar_time
         except Exception:
             logger.exception("Error in bar_watcher_worker")
