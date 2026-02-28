@@ -40,7 +40,7 @@ TRAILING_DISTANCE_ATR = float(os.getenv("TRAILING_DISTANCE_ATR", "0.4"))     # t
 
 # Worker Intervals
 BAR_WATCHER_POLL_S = float(os.getenv("BAR_WATCHER_POLL_S", "1.0"))
-TRAILING_INTERVAL_S = float(os.getenv("TRAILING_INTERVAL_S", "2.0"))
+TRAILING_INTERVAL_S = float(os.getenv("TRAILING_INTERVAL_S", "15"))
 
 # ==========================================
 # Logging Setup
