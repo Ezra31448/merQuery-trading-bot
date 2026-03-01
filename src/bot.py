@@ -9,7 +9,8 @@ from datetime import datetime
 from src.config import SYMBOL, BAR_WATCHER_POLL_S, TRAILING_INTERVAL_S, MAX_DAILY_LOSS_USD, DECISION_MODE, logger
 from src.mt5_client import ensure_mt5_connected
 from src.analysis import get_market_data, get_ai_decision, get_rule_based_decision
-from src.execution import execute_trade, apply_trailing_stop_sync, get_daily_pnl
+from src.execution import execute_trade, apply_trailing_stop_sync, get_daily_pnl ,tighten_sl_for_news_sync
+from src.news_filter import get_imminent_news
 
 
 def bot_routine(ai_decision, current_atr):
@@ -20,6 +21,12 @@ def bot_routine(ai_decision, current_atr):
         current_atr: Current ATR value in price units
     """
     logger.info("Starting analysis cycle (bot_routine)")
+
+    imminent_news, time_diff = get_imminent_news()
+    if imminent_news:
+        logger.warning("🚨 NEWS BLACKOUT ACTIVE! News '%s' is approaching/passed (%.0f mins). Skipping new trades.", 
+                       imminent_news['title'], time_diff)
+        return # หยุดการเปิดออเดอร์ใหม่ทันที
 
     # daily loss check
     daily_pnl = get_daily_pnl()
@@ -97,6 +104,20 @@ async def trailing_stop_worker(interval_seconds: float, stop_event: asyncio.Even
         try:
             # acquire business logic semaphore to avoid overlap with bot_routine
             async with trading_semaphore:
+                # 1. ดึงค่า ATR มาก่อน
+                _, current_atr = await asyncio.to_thread(get_market_data, bars=150)
+                if current_atr:
+                    # 2. เช็คบีบ SL หนีข่าว (Option C)
+                    await asyncio.to_thread(tighten_sl_for_news_sync, current_atr)
+                
+                # 3. รัน Trailing stop ปกติ
+                await asyncio.to_thread(apply_trailing_stop_sync)# 1. ดึงค่า ATR มาก่อน
+                _, current_atr = await asyncio.to_thread(get_market_data, bars=150)
+                if current_atr:
+                    # 2. เช็คบีบ SL หนีข่าว (Option C)
+                    await asyncio.to_thread(tighten_sl_for_news_sync, current_atr)
+                
+                # 3. รัน Trailing stop ปกติ
                 await asyncio.to_thread(apply_trailing_stop_sync)
         except Exception:
             logger.exception("Error in trailing_stop_worker")

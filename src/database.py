@@ -39,3 +39,35 @@ def log_trade(symbol, action, price, sl, tp, reason):
     ''', (current_time_str, symbol, action, price, sl, tp, reason))
     conn.commit()
     conn.close()
+
+def setup_news_database():
+    """Create table for logging news events."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS news_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            news_time DATETIME,
+            currency TEXT,
+            impact TEXT,
+            title TEXT,
+            UNIQUE(news_time, title) 
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def log_news_event(news_time, currency, impact, title):
+    """Log a fetched news event into the database. IGNORE if already exists."""
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            INSERT OR IGNORE INTO news_logs (news_time, currency, impact, title)
+            VALUES (?, ?, ?, ?)
+        ''', (news_time.strftime("%Y-%m-%d %H:%M:%S"), currency, impact, title))
+        conn.commit()
+    except Exception as e:
+        logger.error("Failed to log news to DB: %s", e)
+    finally:
+        conn.close()
