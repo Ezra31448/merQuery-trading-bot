@@ -1,3 +1,5 @@
+from src.news_filter import get_imminent_news
+
 """
 Execution module for the trading bot.
 Handles trade execution, trailing stop, and risk management.
@@ -223,3 +225,66 @@ def get_daily_pnl():
     except Exception as e:
         logger.exception("get_daily_pnl error: %s", e)
         return 0.0
+    
+def tighten_sl_for_news_sync(current_atr):
+    """
+    ถ้าใกล้ข่าวออก (Option C): บีบ SL ให้แคบลงเพื่อลดความเสี่ยง
+    """
+    if not ensure_mt5_connected():
+        return
+
+    # เช็คว่าอยู่ในช่วงใกล้ข่าวหรือเปล่า
+    imminent_news, time_diff = get_imminent_news()
+    if not imminent_news:
+        return # ไม่มีข่าว ไม่ต้องทำอะไร
+
+    # ถ้าข่าวเพิ่งผ่านไปแล้ว (time_diff ติดลบ) ก็ปล่อย Trailing stop ปกติจัดการไป
+    if time_diff < 0: 
+        return
+
+    try:
+        with mt5_lock:
+            positions = mt5.positions_get(symbol=SYMBOL)
+        if not positions:
+            return
+
+        with mt5_lock:
+            s_info = mt5.symbol_info(SYMBOL)
+        point = s_info.point
+        
+        # บีบความเสี่ยง: ปกติเราตั้ง SL ที่ 1.5 ATR ตอนมีข่าวเราบีบเหลือแค่ 0.3 ATR เลย!
+        tight_distance_price = 0.3 * current_atr 
+
+        for p in positions:
+            mag = getattr(p, "magic", None)
+            comment = getattr(p, "comment", "") or ""
+            if mag != MAGIC_NUMBER and (ACTIVE_AI not in comment):
+                continue
+
+            ticket = int(getattr(p, "ticket", 0))
+            existing_sl = float(getattr(p, "sl", 0.0) or 0.0)
+            existing_tp = float(getattr(p, "tp", 0.0) or 0.0)
+            p_type = int(getattr(p, "type", 0))
+
+            with mt5_lock:
+                tick = mt5.symbol_info_tick(SYMBOL)
+            current_price = float(tick.ask) if p_type == mt5.POSITION_TYPE_BUY else float(tick.bid)
+
+            modify_request = None
+            if p_type == mt5.POSITION_TYPE_BUY:
+                new_sl = current_price - tight_distance_price
+                # ถ้าจุดตัดขาดทุนใหม่ (new_sl) อยู่สูงกว่าของเดิม (แปลว่าแคบลง ปลอดภัยขึ้น)
+                if new_sl > existing_sl:
+                    modify_request = {"action": mt5.TRADE_ACTION_SLTP, "position": ticket, "sl": round(new_sl, 2), "tp": existing_tp}
+            else:
+                new_sl = current_price + tight_distance_price
+                if existing_sl == 0 or new_sl < existing_sl:
+                    modify_request = {"action": mt5.TRADE_ACTION_SLTP, "position": ticket, "sl": round(new_sl, 2), "tp": existing_tp}
+
+            if modify_request:
+                with mt5_lock:
+                    res = mt5.order_send(modify_request)
+                logger.warning("🚨 NEWS TIGHTEN SL! Ticket %s: moved SL to %.2f due to %s", ticket, new_sl, imminent_news['title'])
+
+    except Exception as e:
+        logger.exception("tighten_sl_for_news_sync exception: %s", e)

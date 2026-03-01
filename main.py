@@ -16,7 +16,7 @@ import asyncio
 import signal
 import MetaTrader5 as mt5
 from src.config import BAR_WATCHER_POLL_S, TRAILING_INTERVAL_S, logger
-from src.database import setup_database
+from src.database import setup_database , setup_news_database
 from src.bot import bar_watcher_worker, trailing_stop_worker
 
 
@@ -31,6 +31,7 @@ async def main_async():
         logger.error("MT5 initialize failed. Exiting.")
         return
     await asyncio.to_thread(setup_database)
+    await asyncio.to_thread(setup_news_database)
 
     # create semaphore for business logic concurrency control
     trading_semaphore = asyncio.Semaphore(1)
